@@ -19,7 +19,7 @@
 9. [Flink Windowing Functions](#step-9)
 10. [Fraud Detection](#step-10)
 11. [Check Flink Queries](#step-11)
-12. [Connect BigQuery sink to Confluent Cloud](#step-12)
+12. [Connect Clickhouse sink to Confluent Cloud](#step-12)
 13. [Clean Up Resources](#step-13)
 14. [Confluent Resources and Further Testing](#step-14)
 
@@ -37,25 +37,33 @@
 
 1. Create a Confluent Cloud Account.
     - Sign up for a Confluent Cloud account [here](https://www.confluent.io/confluent-cloud/tryfree/).
-    - Once you have signed up and logged in, click on the menu icon at the upper right-hand corner, click on "Billing & payment", then enter payment details under "Payment details & contacts". A screenshot of the billing UI is included below.
+    - Once you have signed up and logged in, click on the menu icon at the upper right-hand corner, click on "Billing & payment", then click "Enter Payment". A screenshot of the billing UI is included below.
+    - On the next screen, click on **Redeem your promo code**, as highlighted in the image below.
+
 
 > [!Note]
 > You will create resources during this workshop that will incur costs. When you sign up for a Confluent Cloud account, you will get free credits to use in Confluent Cloud. This will cover the cost of resources created during the workshop. More details on the specifics can be found [here](https://www.confluent.io/confluent-cloud/tryfree/).
 
 <div align="center" padding=25px>
-    <img src="images/billing.png" width=75% height=75%>
+    <img src="images/RedeemPromoCode0.png" width=75% height=75%>
+</div>
+
+<div align="center" padding=25px>
+    <img src="images/RedeemPromoCode1.png" width=75% height=75%>
 </div>
 
 ## **Objective**
 
-In this hands-on lab, participants will learn and explore how to leverage Confluent Cloud, powered by the Kora Engine, to build a real-time streaming analytics use case and activate the power of data with Google Cloud services such as BigQuery, AutoML, Looker Studio etc.
+In this hands-on lab, participants will learn and explore how to leverage Confluent Cloud, powered by the Kora Engine, to build a real-time streaming analytics use case and activate the power of data with cloud services like **ClickHouse Cloud**.
 
 During the session, we will explore:
 
-- The common challenges of Apache Kafka Deployments
-- How you can easily activate Confluent Cloud on Google Cloud Marketplace
-- How to connect Google Cloud Services with Confluent Cloud
-- The benefits of Confluent Cloud for production workloads on Google Cloud
+During the session, we will explore:
+
+- The common challenges of **Apache Kafka** deployments
+- How to easily set up a **Confluent Cloud** environment
+- How to integrate **Confluent Cloud** with **ClickHouse Cloud** for real-time analytics
+- The benefits of **Confluent Cloud** for production workloads
 
 ***
 
@@ -667,87 +675,164 @@ SELECT * FROM stocks_trades_enriched_user_detail
 	WHERE account = 'ABC123';
 ```
 
-## <a name="step-12"></a>(Optional) Connect BigQuery sink to Confluent Cloud
+## <a name="step-12"></a>(Optional) Connect Clickhouse sink to Confluent Cloud
 
-The next step is to sink data from Confluent Cloud into BigQuery using the [fully-managed BigQuery Sink connector](https://docs.confluent.io/cloud/current/connectors/cc-gcp-bigquery-storage-sink.html). The connector will send real time data on **accounts_to_monitor** into BigQuery.
+The next step is to sink data from Confluent Cloud into Clickhouse Cloud using the [fully-managed Clickhouse Sink connector](https://docs.confluent.io/cloud/current/connectors/cc-clickhouse-sink-connector/cc-clickhouse-sink.html). The connector will send real time data on **accounts_to_monitor** into Clickhouse.
 
-1. First, you will create the connector that will automatically create a BigQuery table and populate that table with the data from the promotions topic within Confluent Cloud. From the Confluent Cloud UI, click on the Connectors tab on the navigation menu and select **+Add connector**. Search and click on the BigQuery Sink icon.
+
+### **1. Create the Destination Table in ClickHouse**
+
+First, you need to create the destination table in your ClickHouse Cloud account where the data will be stored.
+
+Navigate to the **SQL console** in your ClickHouse Cloud UI. Run the following query to create the `accounts_to_monitor` table:
+
+```sql
+CREATE TABLE accounts_to_monitor (
+    `window_start` DateTime64(6),
+    `window_end`   DateTime64(6),
+    `account`      String,
+    `quantity`     Int64
+) ENGINE = MergeTree()
+ORDER BY (account, window_start);
+```
 
 <div align="center">
-    <img src="images/bigquery-1.png" width=30% height=30%>
+    <img src="images/ClickUpSignUp6-CreateTable.png" width=75% height=75%>
 </div>
 
-2. Enter the following configuration details. The remaining fields can be left blank.
+### **2. Get ClickHouse Connection Credentials**
+
+Before configuring the connector, you need your ClickHouse **hostname** and **password**.
+
+1.  In your ClickHouse Cloud UI, navigate to your service and click the **Connect** button.
+2.  In the pop-up window, you will find the **Hostname** (ending in `.clickhouse.cloud`).
+3.  You will also find the **Password** for the `default` user. If not Reset it, Make sure to copy both of these values.
 
 <div align="center">
-
-| Setting                | Value                              |
-|------------------------|------------------------------------|
-| `Topics `              | accounts_to_monitor_XXX            |
-| `Kafka API Key`        | From step 5                        |
-| `Kafka API Secret`     | From step 5                        |
-| `Authentication method`| Google cloud service account       |
-| `GCP Credential file`  | Upload your_gcp_credential_json_file |
-| `Project ID `          | your_project_ID                    |
-| `Dataset`              | accounts_to_monitor                |
-| `Ingestion Mode`       | streaming                          |
-| `Input Kafka format`   | AVRO                               |
-| `Sanitize topics `     | true                               |
-| `Sanitize field name`  | true                               |
-| `Auto create table`    | PARTITION by INGESTION TIME        |
-| `Partitioning type`    | DAY                                |
-| `Max poll interval (ms)`| 60000                             |
-| `Tasks`                | 1                                  |
-| `Name`                 | BigQueryStorageSinkConnector_accounts_to_monitor    |
-
-
+    <img src="images/ClickHouse-ConnectionSetup1.png" alt="Finding the hostname and password reset link in ClickHouse connection details" width=75% height=75%>
 </div>
 
-- Topic Selection
 <div align="center">
-    <img src="images/bigquery-2.png" width=75% height=75%>
+    <img src="images/ClickHouse-ConnectionSetup2.png" alt="Copying the password from the ClickHouse connection dialog" width=75% height=75%>
 </div>
 
-<br>
+---
 
-- Authentication
+### **3. Set Up the Sink Connector in Confluent Cloud**
+
+Now that the destination table exists, you can configure Confluent Cloud to send data to it.
+
+1.  From the Confluent Cloud UI, click on the **Connectors** tab on the navigation menu and select **+ Add connector**.
+
+2.  In the search bar, type `ClickHouse` and select the **ClickHouse Sink** connector.
+
 <div align="center">
-    <img src="images/bigquery-3.png" width=75% height=75%>
+    <img src="images/SetupClickHouseSinkConnector.png" width=75% height=75%>
 </div>
 
-3. Click on **Next**.
+1.  **Topic selection**: Choose the `accounts_to_monitor` topic as the data source and click **Continue**.
 
-4. Before launching the connector, you will be brought to the summary page. Once you have reviewed the configs and everything looks good, select **Launch**.
-
-<div align="center">
-    <img src="images/bigquery-4.png" width=75% height=75%>
+ <div align="center">
+        <img src="images/ConfigureClickHouseSink1.png" alt="Selecting the accounts_to_monitor topic in Confluent Cloud" width=75% height=75%>
 </div>
 
-5. This should return you to the main Connectors landing page. Wait for your newly created connector to change status from **Provisioning** to **Running**.
-
-6. Shortly after, please switch over to the BigQuery page within Google Console to show that a table matching the topic name you used when creating the BigQuery connector in Confluent Cloud has been created within the dataset that you have provided. Clicking the table name should open a BigQuery editor for it.
+2.  **Kafka Credentials**: Select **Use an existing API key** and provide the key and secret for your Kafka cluster. Click **Continue**.
 
 <div align="center">
-    <img src="images/bigquery-5.png" width=75% height=75%>
+    <img src="images/ConfigureClickHouseSink2.png" alt="Entering API key and secret for Kafka credentials" width=75% height=75%>
 </div>
 
-7. Query results in BigQuery.
+3.  **Authentication**: Enter the connection details you retrieved from ClickHouse in the previous step.
+    * **ClickHouse Hostname**: Your `.clickhouse.cloud` URL.
+    * **ClickHouse port**: `8443`
+    * **ClickHouse username**: `default`
+    * **ClickHouse password**: Your copied password.
+    * **Database name**: `default`
 
 <div align="center">
-    <img src="images/bigquery-6.png" width=75% height=75%>
+     <img src="images/ConfigureClickHouseSink3.png" alt="Configuring ClickHouse authentication details in the connector" width=75% height=75%>
 </div>
 
-8. Explore data in Looker Studio.
+4.  **Configuration**: Set the data format and map the topic to the table.
+    * **Input Kafka record value & key format**: Select **AVRO**.
+    * **Topic to Table Mapping**: Enter `accounts_to_monitor:accounts_to_monitor`.
 
 <div align="center">
-    <img src="images/bigquery-7.png" width=75% height=75%>
+        <img src="images/ConfigureClickHouseSink4.png" alt="Mapping Kafka topic to ClickHouse table" width=75% height=75%>
+</div>
+    
+<div align="center">
+    <img src="images/ConfigureClickHouseSink4-1.png" alt="Advanced configuration settings for the ClickHouse sink connector" width=75% height=75%>
 </div>
 
-<br>
+5.  **Sizing**: Leave the number of tasks as the default `1` and click **Continue**.
 
-- Looker Studio
 <div align="center">
-    <img src="images/bigquery-8.png" width=75% height=75%>
+     <img src="images/ConfigureClickHouseSink5.png" alt="Connector sizing configuration screen" width=75% height=75%>
+ </div>
+
+6.  **Review and Launch**: On the final screen, give your connector a descriptive name, such as `accounts_to_monitor_clickhouse_sink`. Review the configuration summary and click **Continue** to launch.
+
+<div align="center">
+        <img src="images/ConfigureClickHouseSink6.png" alt="Reviewing and naming the connector before launch"  width=75% height=75%>
+</div>
+
+---
+
+### **4. Monitor Connector Provisioning**
+
+After launching, you will be taken to the Connectors dashboard. 
+1.  Your new connector will first appear in a **Provisioning** state. This may take a few minutes.
+
+ <div align="center">
+        <img src="images/ConfigureClickHouseSink7.png" alt="Connector in Provisioning state" width="70%">
+</div>
+
+2.  Once the status changes to **Running**, the connector is active and sinking data to ClickHouse. You can now proceed to the next step.
+
+<div align="center">
+        <img src="images/ConfigureClickHouseSink8.png" alt="Connector in Running state" width="70%">
+</div>
+
+---
+
+### **5. Verify Data in ClickHouse**
+
+Once the connector is running, data will start flowing into your ClickHouse table.
+
+1.  Return to the **SQL Console** in ClickHouse Cloud.
+2.  Run the following query to see the raw data arriving from the topic:
+
+    ```sql
+    SELECT * FROM accounts_to_monitor;
+    ```
+
+    You should see rows of data populated in your table, similar to the screenshot below.
+
+<div align="center">
+     <img src="images/ClickHouseVerifyDatafromSink.png" alt="Query results showing data successfully sinked into the ClickHouse table" width=75% height=75%>
+</div>
+
+---
+
+### **6. Analyze the Results with an Aggregate Query**
+
+You can now run analytical queries directly on the streamed data. For example, to find the total number of trades per account, run the following query:
+
+```sql
+SELECT
+    account,
+    sum(quantity) AS total_trades
+FROM accounts_to_monitor
+GROUP BY account
+ORDER BY total_trades DESC
+LIMIT 10;
+```
+
+This will give you an aggregated summary, demonstrating the power of real-time analytics with Confluent and ClickHouse.
+
+<div align="center">
+<img src="images/ClickHouseVerifyDatafromSinkAggregate.png" alt="Results of an aggregate query in ClickHouse, showing total trades per account" width=75% height=75%>
 </div>
 
 ***
@@ -762,10 +847,10 @@ Deleting the resources you created during this workshop will prevent you from in
     <img src="images/flink-delete-compute-pool.png" width=50% height=50%>
 </div>
 
-2. Delete the BigQuery sink connector by navigating to **Connectors** in the navigation panel, clicking your connector name, then clicking the trash can icon in the upper right and entering the connector name to confirm the deletion.
+2. Delete the Clickhouse sink connector by navigating to **Connectors** in the navigation panel, clicking your connector name, then clicking the "Delete Connector" button in the bottom left and entering the connector name to confirm the deletion.
 
 <div align="center">
-    <img src="images/delete-connector.png" width=60% height=60%>
+    <img src="images/clickhouseconnector-destroy.png" width=60% height=60%>
 </div>
 
 3. Next, delete the Datagen Source connectors for **users** and **stocks**.
